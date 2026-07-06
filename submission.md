@@ -330,3 +330,52 @@ elif days_since_last == 1:
         user.listening_streak += 1
 
 To confirm that there weren’t any side effects caused by the change, I reran the test_streaks.py test suite. Now, all 5 tests  are passing, so no other branches of the listening streak logic were affected.
+
+
+## Bug #2
+
+**Issue number and title**
+
+Issue Number: 2
+Title: Friends Listening Now shows people from yesterday
+
+**How you reproduced it**
+
+First, I traced data through the system to determine which function creates and/or returns the list of friends listening now. I opened feed.py, and saw that the appropriate route for this task is /feed/<user_id>/listening-now.  Inside this route’s listen_now() function, get_friends_listening_now from feed_service.py is called. I opened feed_service.py and examined the get_friends_listening_now function and determined that this is where the friends listening now list is created and returned. I tried multiple ways to try to recreate the bug, but ultimately, the most successful way was to create a regression test.
+
+I created a regression test in the new file named test_feed.py. The test, named test_listening_now_does_not_include_yesterday_events. The test creates a controlled mini-database scenario where the current date is set to a fixed date and time (6/10/2024 at 12:30 AM UTC), creates three users (nova, darius, and simone), the three users are given friendship rows so that they are connected, and two listening events are created. A listening event was created for darius with the timestamp June 10 at 12:20 AM. A listening event was created for simone on June 9th at 11:45 PM. The function get_friends_listening_now() is then called with the user_id of nova, a user who is friends with both darius and simone. Since simone’s listening event happened the day before the current date, the test asserts that simone should not be listed in the results returned from get_friends_listening_now().  As expected, the test case failed and simone was included in the results returned from get_friends_listening now().
+
+**How you found the root cause**
+
+As described above, I traced data through the system to determine which function creates and/or returns the list of friends listening now. I started at feed.py and found the appropriate route for the request, which is /feed/<user_id>/listening-now . Then inside this route’s listen_now() function I saw that get_friends_listening_now from feed_service.py is called. I opened feed_service.py and examined the get_friends_listening_now function. Reading through the function, I saw a reference to RECENT_THRESHOLD, which is declared earlier in the feed_service.py file. I saw that RECENT_THRESHOLD, which in get_friends_listening_now(), determines what timeframe of listening events to return, was set to 24 hours. I determined that this logic is the root cause of the issue.
+
+**The root cause**
+
+In plain English, explain exactly what was wrong. Not "there was a bug in the streak logic" — explain the specific condition, comparison, or missing step that caused the problem.
+
+As described above, when examining the feed_service.py file, I saw that RECENT_THRESHOLD, which in get_friends_listening_now(), determines what timeframe of listening events to return, was set to 24 hours.  RECENT_THRESHOLD is declared in line 13 thusly:
+
+RECENT_THRESHOLD = timedelta(hours=24)
+
+And the time cutoff for listening events to be considered recent enough to return is determined in line 32:
+
+cutoff = datetime.now(timezone.utc) - RECENT_THRESHOLD
+
+This line takes the current date and time and subtracts 24 hours from it. This is the oldest record that can be returned.  However, suppose the current date and time is July 5th, 2026 11:30 AM. If the cutoff starts at 24 hours before, we could get listening events from July 4th 11:30 AM. This is how dates that are within 24 hours, but that in terms of date are from the day before, are being returned. According to the bug report, this does not appear to be the desired behavior.  The desired behavior appears to be that only listening events from the current day are returned.
+
+**Your fix and side-effect check**
+
+I changed the cutoff variable so that only listening events from earlier on the same day will be returned, rather than events from the last 24 hours.
+
+Before (Line 32): 
+
+cutoff = datetime.now(timezone.utc) - RECENT_THRESHOLD
+
+After (Lines 32-33):
+
+now = datetime.now(timezone.utc)
+cutoff = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+
+This makes the cutoff midnight UTC of the current day. Therefore, only listening events that occurred on the current day will be returned.
+
+After implementing the fix, I reran my regression test to confirm that friends whose most recent listening event occurred on the previous calendar day were no longer returned. I also verified that friends who listened on the current day still appeared in the feed, that the results remained ordered from most recent to least recent, and that each friend still appeared only once in the returned list.
