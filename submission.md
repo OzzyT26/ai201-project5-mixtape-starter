@@ -1,3 +1,15 @@
+# AI Usage
+
+I utilized ChatGPT to help familiarize myself with the codebase. I used the App Structure section of the README file to begin familiarizing myself with the codebase. I then provided ChatGPT specific files and asked it to summarize each file's purpose/responsibility and the functions contained in each file. This helped me build a mental map of the structure of the codebase and what each file does. 
+
+I asked ChatGPT to do data flows for a few featurues, such as a user rating a song. This helped me understand how data enters the program and each step that it the program takes as the request is fulfilled. I double checked this manually to be sure that the dataflows that it provided are correct.
+
+I asked it to explain an unfamiliar Python module and SQLAlchemy concepts, including datetime, tzinfo, weekday(), timedelta, SQLAlchemy queries, and .all(). I also used ChatGPT to answer questions about Flask development tools, including how to use the Flask shell to pull data from the database for my tests.
+
+I also used ChatGPT to generate a regression test after I had already determined the expected behavior and the scenario needed to reproduce the bug. I reviewed the regression test to make sure it was creating the correct conditions to reproduce the error.
+
+As ChatGPT was summarizing the main files, I had the main files open and read through them briefly. I noticed that ChatGPT when ChatGPT was summarizing models.py, it was giving a very high level description of each association table. For debugging purposes, I believed it would be useful to have the exact schema of each of these association tables.  I gave ChatGPT detailed instructions and had it generate the schema for each of the association tables and their constraints.
+
 # Codebase Map
 
 ## Main Files
@@ -15,6 +27,8 @@ Creates and configures the Flask application using the application factory patte
 ### models.py
 
 **Module Responsibility**
+
+This module defines the database structure for the Mixtape app using SQLAlchemy. It contains the tables, models, relationships, and to_dict() methods that convert database objects into JSON-friendly dictionaries.
 
 **Main Functions**
 generate_uuid()
@@ -379,3 +393,41 @@ cutoff = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
 This makes the cutoff midnight UTC of the current day. Therefore, only listening events that occurred on the current day will be returned.
 
 After implementing the fix, I reran my regression test to confirm that friends whose most recent listening event occurred on the previous calendar day were no longer returned. I also verified that friends who listened on the current day still appeared in the feed, that the results remained ordered from most recent to least recent, and that each friend still appeared only once in the returned list.
+
+## Bug #5
+
+**Issue number and title**
+
+Issue Number: 5
+Title: The last song in a playlist never shows up
+
+**How you reproduced it**
+
+I saw that there was already a test suite for the playlists service, so I ran the test file.  As expected, test_playlist_returns_all_songs failed and confirmed that the get_playlist_songs function is not returning the last song of the playlist. The function was given a test playlist_id with 5 songs, however the number of songs returned was 4. 
+
+**How you found the root cause**
+
+Since the playlist test called the get_playlist_songs function, used built in VS Code functionality to find the function in the files.  The function is located in the playlist_service.py file. When reading through the function, I discovered an error in the return statement that is causing the last song in the playlist to not be copied and returned.
+
+**The root cause**
+
+On line 66 of playlist_sertice.py, in the get_playlist_songs function, a slice is being taken from the list of songs returned from the database query, but the end index of the slice is set to -1.  Python slices include the item at the start index, but exclude the item at the end index. Therefore, the item at index -1, which is the end of the list, won’t be included.
+
+Line 66:
+
+return [song.to_dict() for song in songs[:-1]]
+
+**Your fix and side-effect check**
+
+I removed the slice from line 66, as the function should be returning the entire songs list returned from the database.
+
+Line 66 Before:
+
+return [song.to_dict() for song in songs[:-1]]
+
+
+Line 66 After:
+
+return [song.to_dict() for song in songs]
+
+After making the change, I reran the test_playlists.py test suite to make sure that the fix resolved the issue and that the fix didn’t have any intended side effects. All tests passed, so the fix worked as intended.
